@@ -1,0 +1,63 @@
+sudo: required
+language: bash
+
+services:
+ - docker
+
+env:
+  global:
+    - QEMU_VERSION=v2.11.0
+    - GITHUB_REPO=minio/minio
+    - REGISTRY=jessestuart
+    - IMAGE=minio
+  matrix:
+    - TARGET=arm64v8 QEMU_ARCH=aarch64 TAG=arm64
+    - TARGET=arm32v6 QEMU_ARCH=arm TAG=arm
+
+script:
+  - export DIR=`pwd`
+  - eval "$(curl -sL https://raw.githubusercontent.com/travis-ci/gimme/master/gimme | GIMME_GO_VERSION=1.9.4 bash)"
+  - export GOARCH=${TAG}
+  - go version
+  - go env
+# Download
+  - 'export VERSION=$(curl -s -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/repos/${GITHUB_REPO}/releases/latest | jq -r ".tag_name")'
+  - git clone https://github.com/${GITHUB_REPO} --depth=1 -b ${VERSION} ${IMAGE}
+  - echo "Building ${GITHUB_REPO} version $VERSION for $GOARCH."
+  - mkdir -p $GOPATH/src/github.com/${IMAGE}
+  - mv ${IMAGE} $GOPATH/src/github.com/${IMAGE}
+  - cd $GOPATH/src/github.com/${GITHUB_REPO}
+# Get deps
+  - go get .
+# Build
+  - make
+# Get QEMU
+  - curl -sL -o qemu-${QEMU_ARCH}-static.tar.gz https://github.com/multiarch/qemu-user-static/releases/download/${QEMU_VERSION}/qemu-${QEMU_ARCH}-static.tar.gz && tar zx -f qemu-${QEMU_ARCH}-static.tar.gz
+# Build image
+  - docker run --rm --privileged multiarch/qemu-user-static:register
+  - cp $DIR/Dockerfile .
+  - docker build -t ${REGISTRY}/${IMAGE}:${VERSION}-${TAG} --build-arg target=$TARGET --build-arg arch=$QEMU_ARCH -f Dockerfile .
+# Push image
+  - if [ "$TRAVIS_BRANCH" == "master" ]; then
+      docker login -u="$DOCKER_USER" -p="$DOCKER_PASS" ;
+      docker push ${REGISTRY}/${IMAGE}:${VERSION}-${TAG} ;
+    fi
+
+jobs:
+# Create image manifest
+  include:
+    - stage: deploy
+      script:
+        - 'export VERSION=$(curl -s -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/repos/${GITHUB_REPO}/releases/latest | jq -r ".tag_name")'
+        - docker login -u="$DOCKER_USER" -p="$DOCKER_PASS"
+        - echo "Downloading manifest-tool"
+        - wget https://github.com/estesp/manifest-tool/releases/download/v0.7.0/manifest-tool-linux-amd64
+        - mv manifest-tool-linux-amd64 manifest-tool
+        - chmod +x manifest-tool
+        - ./manifest-tool --version
+        - echo "Pushing manifest "$REGISTRY/$IMAGE":latest"
+        - ./manifest-tool push from-args --platforms linux/arm,linux/arm64 --template "$REGISTRY/$IMAGE:$VERSION-ARCH" --target "$REGISTRY/$IMAGE:latest"
+        - ./manifest-tool push from-args --platforms linux/arm,linux/arm64 --template "$REGISTRY/$IMAGE:$VERSION-ARCH" --target "$REGISTRY/$IMAGE:$VERSION"
+      env:
+        # Overwrite env to avoid running stage for entire
+        TARGET=none QEMU_ARCH=none TAG=none

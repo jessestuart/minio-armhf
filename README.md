@@ -1,3 +1,8 @@
+# NOTE: Deprecated in favor of https://github.com/jessestuart/minio-multiarch
+
+**For nightly multiarch (`amd64`, `arm64`, and `armv7`) builds, see the [updated
+version](https://github.com/jessestuart/minio-multiarch) of this repo.**
+
 ### Minio Server on Docker ARM
 
 [Minio][minio-home] is a FOSS project offering a "high performance distributed
